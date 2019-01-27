@@ -195,9 +195,9 @@ function formatSheet(sheetId, category, callback) {
         userEnteredFormat: {
           horizontalAlignment: 'CENTER',
           backgroundColor: {
-            red: 0.0,
-            green: 0.0,
-            blue: 0.0,
+            red: 0,
+            green: 0,
+            blue: 0,
           },
           textFormat: {
             foregroundColor: {
