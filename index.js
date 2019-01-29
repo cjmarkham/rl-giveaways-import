@@ -2,6 +2,7 @@ const fs = require('fs')
 const readline = require('readline')
 const { google } = require('googleapis')
 const items = require('./items.js')
+const COLORS = require('./colors.js')
 
 // If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -74,7 +75,7 @@ function writeData (auth) {
   sheets = google.sheets({version: 'v4', auth});
 
   for (let category in items) {
-    createSheetIfNeeded(auth, category, function () {
+    createSheetIfNeeded(auth, category, function (sheetId) {
       buildArrayOfData(category).then(data => {
         const request = {
           spreadsheetId: SHEET_ID,
@@ -88,6 +89,81 @@ function writeData (auth) {
           if (err) {
             console.error(err.errors)
           }
+
+          let requests = []
+
+          data.forEach(d => {
+            const colorRange = d.range.replace(/\w+![A-Z][0-9]+:([A-Z+][0-9]+)/, '$1')
+            const colorRow = colorRange[0]
+            let colorColumn = colorRange[1]
+            if (colorRange.length === 3) {
+              colorColumn = colorRange[1] + colorRange[2]
+            }
+            let color;
+            Object.keys(COLORS).map(function (c) {
+              if (COLORS[c].name == d.values[0][2]) {
+                color = COLORS[c]
+              }
+            })
+            let backgroundColor;
+            let foregroundColor = {r: 0, g: 0, b: 0}
+
+            if ( ! color) {
+              backgroundColor = {r: 0, g: 0, b: 0}
+            } else {
+              backgroundColor = hexToRgb('#' + color.color)
+              if (color.text) {
+                foregroundColor = hexToRgb(color.text)
+              }
+            }
+
+            if (d.values[0][2] === 'Not painted') {
+              foregroundColor = {r: 255, g: 255, b: 255}
+            }
+
+            requests.push({
+              repeatCell: {
+                range: {
+                  sheetId,
+                  startRowIndex: colorColumn - 2,
+                  endRowIndex: colorColumn - 1,
+                  startColumnIndex: (colorRow.charCodeAt(0) - 64) - 1,
+                  endColumnIndex: (colorRow.charCodeAt(0) - 64),
+                },
+                cell: {
+                  userEnteredFormat: {
+                    backgroundColor: {
+                      red: backgroundColor.r / 255,
+                      green: backgroundColor.g / 255,
+                      blue: backgroundColor.b / 255,
+                    },
+                    textFormat: {
+                      foregroundColor: {
+                        red: foregroundColor.r / 255,
+                        green: foregroundColor.g / 255,
+                        blue: foregroundColor.b / 255,
+                      }
+                    }
+                  }
+                },
+                fields: "userEnteredFormat(textFormat,backgroundColor)",
+              }
+            })
+          })
+
+          setTimeout(() => {
+            const batchUpdateRequest = { requests };
+
+            sheets.spreadsheets.batchUpdate({
+              spreadsheetId: SHEET_ID,
+              resource: batchUpdateRequest,
+            }, (err, response) => {
+              if (err) {
+                console.error(err.errors)
+                return
+              }
+            }, 2000)
+          })
         })
       })
     })
@@ -105,7 +181,7 @@ async function buildArrayOfData(category) {
       row = 1
     } else {
       column = nextLetter(column)
-      if (column == 'I') {
+      if (column == 'P') {
         column = 'B'
         row += 5
       }
@@ -128,10 +204,10 @@ async function buildArrayOfData(category) {
       majorDimension: 'COLUMNS',
       values: [
         [
-          '=IMAGE("' + image.url + '", 2)',
           name,
-          item['painted'] || '-',
-          item['certified'] || '-',
+          '=IMAGE("' + image.url + '", 2)',
+          item['painted'] ? item['painted']['name'] : 'Not painted',
+          item['certified'] ? item['certified'].toUpperCase() : 'Not certified',
         ]
       ]
     }
@@ -140,7 +216,7 @@ async function buildArrayOfData(category) {
 
 function nextLetter (currentLetter) {
   let charCode = currentLetter.charCodeAt(currentLetter.length - 1)
-  return String.fromCharCode(charCode + 1).toUpperCase()
+  return String.fromCharCode(charCode + 2).toUpperCase()
 }
 
 function createSheetIfNeeded (authClient, category, callback) {
@@ -210,140 +286,60 @@ function formatSheet(sheetId, category, callback) {
       },
       fields: "userEnteredFormat(horizontalAlignment,textFormat,backgroundColor)",
     }
-  }, {
-    updateDimensionProperties: {
-      range: {
-        sheetId,
-        dimension: 'COLUMNS',
-        startIndex: 1,
-        endIndex: 8,
-      },
-      properties: {
-        pixelSize: 200,
-      },
-      fields: 'pixelSize'
-    }
   }]
 
-  for (var i = 0; i < 50; i+=5) {
-    for (var j = 1; j <= 8; j++) {
-      requests.push({
-        repeatCell: {
-          range: {
-            sheetId,
-            startRowIndex: i,
-            endRowIndex: i+1,
-            startColumnIndex: j,
-            endColumnIndex: 8,
-          },
-          cell: {
-            userEnteredFormat: {
-              borders: {
-                top: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                bottom: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                left: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                right: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                }
-              },
-            }
-          },
-          fields: "userEnteredFormat(borders)",
-        }
-      })
-    }
+  for (var o = 1; o < 14; o+=2) {
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId,
+          dimension: 'COLUMNS',
+          startIndex: o,
+          endIndex: o+1,
+        },
+        properties: {
+          pixelSize: 200,
+        },
+        fields: 'pixelSize'
+      }
+    })
   }
 
-  for (var i = 1; i < 50; i+=5) {
-    for (var j = 1; j <= 8; j++) {
-      requests.push({
-        repeatCell: {
-          range: {
-            sheetId,
-            startRowIndex: i,
-            endRowIndex: i+3,
-            startColumnIndex: j,
-            endColumnIndex: 8,
-          },
-          cell: {
-            userEnteredFormat: {
-              borders: {
-                top: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                bottom: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                left: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                },
-                right: {
-                  width: 1,
-                  style: 'SOLID',
-                  color: {
-                    red: 1.0,
-                    green: 1.0,
-                    blue: 1.0,
-                  }
-                }
-              },
-            }
-          },
-          fields: "userEnteredFormat(borders)",
-        }
-      })
-    }
+  for (var o = 0; o < 15; o+=2) {
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId,
+          dimension: 'COLUMNS',
+          startIndex: o,
+          endIndex: o+1,
+        },
+        properties: {
+          pixelSize: 20,
+        },
+        fields: 'pixelSize'
+      }
+    })
   }
 
   // Update the row heights
+  for (var i = 0; i <= 50; i += 5) {
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId,
+          dimension: 'ROWS',
+          startIndex: i + 1,
+          endIndex: i + 2,
+        },
+        properties: {
+          pixelSize: 200,
+        },
+        fields: 'pixelSize'
+      }
+    })
+  }
+
   for (var i = 0; i <= 50; i += 5) {
     requests.push({
       updateDimensionProperties: {
@@ -354,9 +350,35 @@ function formatSheet(sheetId, category, callback) {
           endIndex: i + 1,
         },
         properties: {
-          pixelSize: 200,
+          pixelSize: 40,
         },
         fields: 'pixelSize'
+      }
+    })
+  }
+
+  for (var i = 0; i <= 50; i += 5) {
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: i,
+          endRowIndex: i + 1,
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              fontSize: 12,
+              bold: true,
+              foregroundColor: {
+                red: 1.0,
+                green: 1.0,
+                blue: 1.0,
+              }
+            },
+            verticalAlignment: 'MIDDLE',
+          }
+        }, fields: 'userEnteredFormat(textFormat,verticalAlignment)',
       }
     })
   }
@@ -372,40 +394,8 @@ function formatSheet(sheetId, category, callback) {
       return
     }
 
-    setDefaultData(category, callback)
+    callback(sheetId)
   })
-}
-
-function setDefaultData(category, callback) {
-  let rows = Math.ceil(items[category].length / 7)
-  console.log('Rows', rows, items[category].length)
-
-
-  for (let i = 2; i < 5 * rows; i += 5) {
-    let range = category + '!A' + i + ':A' + (i + 2)
-    let values = [
-      [
-        'Name',
-        'Painted?',
-        'Certified?',
-      ]
-    ]
-
-    const resource = { values, majorDimension: 'COLUMNS' }
-    
-    sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range,
-      valueInputOption: 'USER_ENTERED',
-      resource
-    }, (err, result) => {
-      if (err) { 
-        console.error(err.errors) 
-      }
-    })
-  }
-
-  callback()
 }
 
 function getImage (category, itemName) {
@@ -414,3 +404,16 @@ function getImage (category, itemName) {
   return images.find(image => image.name === itemName)
 }
 
+function hexToRgb(hex) {
+    var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+    hex = hex.replace(shorthandRegex, function(m, r, g, b) {
+        return r + r + g + g + b + b;
+    });
+
+    var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
